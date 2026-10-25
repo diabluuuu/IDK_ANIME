@@ -202,6 +202,12 @@ function show_infobox() {
     --pad-y: max(var(--gutter), env(safe-area-inset-top, 0px), env(safe-area-inset-bottom, 0px));
     --vh: 100vh;
 
+    /* game frame dimensions (the HUD plates and scroll rods are reserved out of the window size) */
+    --gap: 5px;          /* dark mat between the picture and the glowing ring */
+    --ring: 2px;         /* thickness of the glowing ring */
+    --hud-h: 40px;       /* height reserved above AND below the picture (plate + ring + gap). 0px = no HUD */
+    --rod-w: 22px;       /* width reserved left AND right of the picture for the scroll rods */
+
     --font-title: "Shippori Mincho B1", "Yu Mincho", "Hiragino Mincho ProN", Georgia, "Times New Roman", serif;
     --font-ui: "Chakra Petch", "Bahnschrift", "Segoe UI", system-ui, -apple-system, Roboto, sans-serif;
 }
@@ -314,6 +320,19 @@ body::-webkit-scrollbar { display: none; width: 0; height: 0; }
     80%  { opacity: .55; }
     100% { transform: translate3d(var(--drift), -110vh, 0) scale(.3); opacity: 0; }
 }
+/* warm pool of light behind the stage: fades in when the game starts so the frame looks lit from behind */
+.ambient__spot {
+    position: absolute;
+    top: 50%; left: 50%;
+    width: min(150vw, 2200px);
+    height: min(110vh, 1500px);
+    transform: translate(-50%, -50%);
+    background: radial-gradient(closest-side, rgba(255, 138, 31, .16), rgba(232, 89, 12, .06) 55%, transparent 100%);
+    opacity: 0;
+    transition: opacity 1.6s ease .2s;
+}
+.game-live .ambient__spot { opacity: 1; }
+
 /* in-game: the backdrop steps back so the canvas is the star */
 .game-live .ambient__seal   { opacity: .2; }
 .game-live .ambient__embers { opacity: .5; }
@@ -336,16 +355,21 @@ body::-webkit-scrollbar { display: none; width: 0; height: 0; }
     pointer-events: none;   /* only the stage itself takes input */
 }
 
-/* Largest 1100:700 box that fits the window. The canvas fills it, so it is never stretched.
+/* Largest 1100:700 box that fits the window once the HUD plates (top + bottom) and the scroll rods
+   (left + right) have been reserved. The canvas fills the box exactly, so it is never stretched.
    The script at the bottom may set --snap-w to land on an exact whole-number scale (pixel-perfect). */
 #stage {
-    --radius: clamp(6px, 1.3vmin, 14px);   /* corner radius of the game picture itself */
-    --gap: 5px;                            /* dark "mat" between the picture and the glowing ring */
-    --ring: 2px;                           /* thickness of the glowing ring */
+    --radius: clamp(6px, 1.3vmin, 14px);                       /* corner radius of the game picture itself */
+    --rr: calc(var(--radius) + var(--gap) + var(--ring));      /* corner radius of the glowing ring */
+    --plate-h: calc(var(--hud-h) - var(--gap) - var(--ring) - 4px);
+    --plate-inset: calc(var(--rr) + 10px);
+    --cut: 15px;
 
     position: relative;
     pointer-events: auto;
-    width: var(--snap-w, min(calc(100vw - 2 * var(--pad-x)), calc((var(--vh) - 2 * var(--pad-y)) * 1100 / 700)));
+    width: var(--snap-w, min(
+        calc(100vw - 2 * var(--pad-x) - 2 * var(--rod-w)),
+        calc((var(--vh) - 2 * var(--pad-y) - 2 * var(--hud-h)) * 1100 / 700)));
     aspect-ratio: 1100 / 700;
     background: var(--night);
     border-radius: var(--radius);
@@ -355,17 +379,20 @@ body::-webkit-scrollbar { display: none; width: 0; height: 0; }
     -webkit-touch-callout: none;
     -webkit-tap-highlight-color: transparent;
 
-    /* hidden while the splash is up; fades in as the splash fades out */
+    /* hidden while the splash is up; fades in as the splash fades out.
+       (No transform on the stage, ever: it would change the box that mouse coordinates are measured against.) */
     opacity: 0;
     transition: opacity .7s ease .12s;
 
-    /* The frame is drawn with box-shadow, a child ring and pseudo-elements, NOT with a border or padding:
-       pygbag/SDL needs the canvas box to be exact or mouse coordinates drift. */
+    /* Everything decorative hangs OFF the canvas box with absolute positioning and negative offsets.
+       No border, no padding: pygbag/SDL needs the canvas box to be exact or mouse coordinates drift. */
     box-shadow:
-        0 0 0 var(--gap) #07080e,                  /* dark mat */
-        0 0 38px 4px rgba(255, 138, 31, .18),      /* warm halo */
-        0 0 120px 18px rgba(53, 208, 255, .07),    /* wide cool aura */
-        0 34px 70px -12px rgba(0, 0, 0, .8);       /* grounded drop shadow */
+        0 0 0 var(--gap) #06070c,                  /* 1. dark mat between picture and ring */
+        0 0 0 calc(var(--gap) + var(--ring) + 1px) rgba(0, 0, 0, .55),  /* 2. crisp outer keyline */
+        0 0 34px 2px rgba(255, 138, 31, .20),      /* 3. tight warm halo */
+        0 0 90px 10px rgba(232, 89, 12, .12),      /* 4. wide ember glow */
+        0 0 180px 30px rgba(53, 208, 255, .06),    /* 5. faint cold aura */
+        0 40px 80px -14px rgba(0, 0, 0, .85);      /* 6. grounded drop shadow */
 }
 .game-live #stage { opacity: 1; }
 
@@ -396,7 +423,22 @@ body::-webkit-scrollbar { display: none; width: 0; height: 0; }
 }
 #stage[data-scale="smooth"] > #canvas { image-rendering: auto; }
 
-/* glowing gradient ring around the game (a masked gradient, so the picture itself is never covered) */
+/* ---- breathing halo: a pre-blurred glow whose OPACITY pulses (compositor only, costs the game nothing) ---- */
+.halo {
+    position: absolute;
+    z-index: -1;
+    pointer-events: none;
+    top:    calc(-1 * (var(--gap) + var(--ring)));
+    right:  calc(-1 * (var(--gap) + var(--ring)));
+    bottom: calc(-1 * (var(--gap) + var(--ring)));
+    left:   calc(-1 * (var(--gap) + var(--ring)));
+    border-radius: var(--rr);
+    box-shadow: 0 0 46px 6px rgba(255, 138, 31, .34), 0 0 120px 24px rgba(232, 89, 12, .16);
+    animation: halo-breathe 6s ease-in-out infinite;
+}
+@keyframes halo-breathe { 0%, 100% { opacity: .55; } 50% { opacity: 1; } }
+
+/* ---- glowing gradient ring (a masked gradient, so the picture itself is never covered) ---- */
 .frame {
     position: absolute;
     z-index: 2;
@@ -406,7 +448,7 @@ body::-webkit-scrollbar { display: none; width: 0; height: 0; }
     right:  calc(-1 * (var(--gap) + var(--ring)));
     bottom: calc(-1 * (var(--gap) + var(--ring)));
     left:   calc(-1 * (var(--gap) + var(--ring)));
-    border-radius: calc(var(--radius) + var(--gap) + var(--ring));
+    border-radius: var(--rr);
     border: var(--ring) solid rgba(255, 138, 31, .75);          /* fallback for very old browsers */
 }
 @supports ((-webkit-mask-composite: xor) or (mask-composite: exclude)) {
@@ -415,7 +457,7 @@ body::-webkit-scrollbar { display: none; width: 0; height: 0; }
         padding: var(--ring);
         /* orange from the bottom-left (like the splash glow) through gold to a cold neon tip top-right */
         background: linear-gradient(to top right,
-            #e8590c 0%, #ff8a1f 24%, #ffd27a 50%, #ff8a1f 74%, #35d0ff 100%);
+            #e8590c 0%, #ff8a1f 22%, #ffd27a 50%, #ff8a1f 76%, #35d0ff 100%);
         -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
         -webkit-mask-composite: xor;
                 mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
@@ -423,50 +465,291 @@ body::-webkit-scrollbar { display: none; width: 0; height: 0; }
     }
 }
 
-/* targeting-reticle corner brackets, just outside the ring */
-#stage::before {
-    content: "";
+/* thin inner hairline just inside the picture edge: a "glass" lip. It is a 1px line, not an overlay on the art. */
+.lip {
     position: absolute;
-    z-index: 3;
-    pointer-events: none;
-    top: -12px;
-    right: -12px;
-    bottom: -12px;
-    left: -12px;
-    --l: clamp(14px, 3vmin, 30px);
-    --t: 2px;
-    --c: rgba(255, 138, 31, .95);
-    background:
-        linear-gradient(var(--c), var(--c)) 0 0 / var(--l) var(--t) no-repeat,
-        linear-gradient(var(--c), var(--c)) 0 0 / var(--t) var(--l) no-repeat,
-        linear-gradient(var(--c), var(--c)) 100% 0 / var(--l) var(--t) no-repeat,
-        linear-gradient(var(--c), var(--c)) 100% 0 / var(--t) var(--l) no-repeat,
-        linear-gradient(var(--c), var(--c)) 0 100% / var(--l) var(--t) no-repeat,
-        linear-gradient(var(--c), var(--c)) 0 100% / var(--t) var(--l) no-repeat,
-        linear-gradient(var(--c), var(--c)) 100% 100% / var(--l) var(--t) no-repeat,
-        linear-gradient(var(--c), var(--c)) 100% 100% / var(--t) var(--l) no-repeat;
-    filter: drop-shadow(0 0 4px rgba(255, 138, 31, .7));
-}
-
-/* one-off glow pulse on the frame when the splash hands over to the game */
-#stage::after {
-    content: "";
-    position: absolute;
-    top: 0; right: 0; bottom: 0; left: 0;
     z-index: 2;
+    top: 0; right: 0; bottom: 0; left: 0;
     pointer-events: none;
     border-radius: inherit;
-    opacity: 0;
-    box-shadow: 0 0 0 1px rgba(255, 170, 70, .9), 0 0 44px 8px rgba(255, 138, 31, .55);
+    box-shadow: inset 0 0 0 1px rgba(255, 210, 122, .22), inset 0 0 22px rgba(255, 138, 31, .07);
 }
-.game-live #stage::after { animation: frame-flash 1.2s ease-out .15s 1; }
-@keyframes frame-flash { from { opacity: 1; } to { opacity: 0; } }
 
-/* phones / very short windows: give the game every pixel, drop the decoration */
-@media (max-width: 640px), (max-height: 520px) {
-    :root { --gutter: 6px; }
-    #stage { --gap: 2px; --ring: 1.5px; --radius: 4px; }
-    #stage::before { display: none; }
+/* light glints that travel along the top and bottom edges of the ring (transform-only animation) */
+.glint {
+    position: absolute;
+    z-index: 3;
+    left:  calc(-1 * (var(--gap) + var(--ring)) + var(--rr));
+    right: calc(-1 * (var(--gap) + var(--ring)) + var(--rr));
+    height: var(--ring);
+    overflow: hidden;
+    pointer-events: none;
+}
+.glint--top    { top:    calc(-1 * (var(--gap) + var(--ring))); }
+.glint--bottom { bottom: calc(-1 * (var(--gap) + var(--ring))); }
+.glint i {
+    position: absolute;
+    top: 0; left: 0;
+    width: 100%;
+    height: 100%;
+    background: linear-gradient(90deg, transparent 38%, rgba(255, 244, 214, .95) 50%, transparent 62%);
+    filter: drop-shadow(0 0 4px rgba(255, 220, 150, .9));
+    transform: translateX(-100%);
+    animation: glint-run 9s cubic-bezier(.45, 0, .25, 1) infinite;
+    will-change: transform;
+}
+.glint--bottom i { animation-delay: 4.5s; animation-direction: reverse; }
+@keyframes glint-run {
+    0%        { transform: translateX(-100%); }
+    42%, 100% { transform: translateX(100%); }
+}
+
+/* corner clasps: little gold gems seated on the 45 degree point of each rounded corner of the ring */
+.clasp {
+    position: absolute;
+    z-index: 4;
+    width: 9px;
+    height: 9px;
+    pointer-events: none;
+    background: linear-gradient(135deg, #fff0c2, #ffb347 55%, #e8590c);
+    box-shadow: 0 0 0 1px rgba(40, 14, 0, .85), 0 0 10px rgba(255, 138, 31, .9);
+    transform: rotate(45deg);
+    --o: calc(-1 * (var(--gap) + var(--ring)) + var(--rr) * .2929 - 4.5px);
+}
+.clasp--tl { top: var(--o);    left: var(--o); }
+.clasp--tr { top: var(--o);    right: var(--o); }
+.clasp--bl { bottom: var(--o); left: var(--o); }
+.clasp--br { bottom: var(--o); right: var(--o); }
+
+/* ---- scroll rods: the two lacquered rollers of a ninja scroll, with gold end caps ---- */
+.rod {
+    position: absolute;
+    z-index: 3;
+    width: 8px;
+    top:    calc(-1 * var(--hud-h) + 2px);
+    bottom: calc(-1 * var(--hud-h) + 2px);
+    pointer-events: none;
+    border-radius: 4px;
+    background: linear-gradient(90deg, #1c0d04 0%, #6e3109 22%, #ffb347 50%, #6e3109 78%, #1c0d04 100%);
+    box-shadow: 0 0 0 1px rgba(0, 0, 0, .7), 0 0 14px rgba(255, 138, 31, .35), 0 10px 22px rgba(0, 0, 0, .55);
+}
+.rod--l { left:  calc(-1 * (var(--gap) + var(--ring)) - 6px - 8px); }
+.rod--r { right: calc(-1 * (var(--gap) + var(--ring)) - 6px - 8px); }
+.rod::before,
+.rod::after {              /* end caps */
+    content: "";
+    position: absolute;
+    left: -3px;
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    background: radial-gradient(circle at 35% 30%, #fff0c2 0, #ffb347 40%, #b34a08 100%);
+    box-shadow: 0 0 0 1px rgba(40, 14, 0, .85), 0 0 10px rgba(255, 138, 31, .75);
+}
+.rod::before { top: -7px; }
+.rod::after  { bottom: -7px; }
+/* a short cord-wrap band near each end */
+.rod i {
+    position: absolute;
+    left: 0; right: 0;
+    height: 18px;
+    background: repeating-linear-gradient(180deg, rgba(20, 8, 0, .75) 0 2px, rgba(255, 210, 122, .25) 2px 4px);
+}
+.rod i:first-child { top: 9px; }
+.rod i:last-child  { bottom: 9px; }
+
+/* ---- HUD plates: angled tabs above and below the picture (same cut-corner language as the Start button) ---- */
+.hud {
+    position: absolute;
+    z-index: 4;
+    left: var(--plate-inset);
+    right: var(--plate-inset);
+    height: var(--plate-h);
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    box-sizing: border-box;
+    padding: 0 calc(var(--cut) + 6px);
+    pointer-events: none;
+    font: 600 11px / 1 var(--font-ui);
+    letter-spacing: .16em;
+    text-transform: uppercase;
+    color: var(--ink-dim);
+    filter: drop-shadow(0 0 10px rgba(255, 138, 31, .22)) drop-shadow(0 6px 10px rgba(0, 0, 0, .55));
+}
+.hud--top    { bottom: calc(100% + var(--gap) + var(--ring) + 4px); }
+.hud--bottom { top:    calc(100% + var(--gap) + var(--ring) + 4px); }
+
+/* plate body: a gradient "border" layer with the dark panel inset 1px on top of it, both cut at the ends */
+.hud::before,
+.hud::after {
+    content: "";
+    position: absolute;
+    z-index: -1;
+}
+.hud::before {
+    top: 0; right: 0; bottom: 0; left: 0;
+    background: linear-gradient(90deg, rgba(255, 138, 31, .35), rgba(255, 210, 122, .9) 50%, rgba(255, 138, 31, .35));
+}
+.hud::after {
+    top: 1px; right: 1px; bottom: 1px; left: 1px;
+    background:
+        linear-gradient(90deg, rgba(255, 138, 31, .10), transparent 30%, transparent 70%, rgba(255, 138, 31, .10)),
+        linear-gradient(180deg, #1b1f35, #0b0d17);
+}
+.hud--top::before,
+.hud--top::after {
+    clip-path: polygon(0 100%, var(--cut) 0, calc(100% - var(--cut)) 0, 100% 100%);
+}
+.hud--bottom::before,
+.hud--bottom::after {
+    clip-path: polygon(0 0, 100% 0, calc(100% - var(--cut)) 100%, var(--cut) 100%);
+}
+.hud--bottom::after { background: linear-gradient(180deg, #0b0d17, #1b1f35); }
+
+.hud__crest {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    font: 800 13px / 1 var(--font-title);
+    letter-spacing: .24em;
+    white-space: nowrap;
+    background: linear-gradient(180deg, #fff0c2, #ffb347 55%, #ff8a1f);
+    -webkit-background-clip: text;
+            background-clip: text;
+    -webkit-text-fill-color: transparent;
+    color: transparent;
+}
+.hud__gem {
+    flex: none;
+    width: 7px;
+    height: 7px;
+    transform: rotate(45deg);
+    background: linear-gradient(135deg, #fff0c2, #ff8a1f);
+    box-shadow: 0 0 8px rgba(255, 138, 31, .95);
+    -webkit-text-fill-color: initial;
+}
+.hud__rule {                /* flexible ornament line, with a diamond at its centre */
+    position: relative;
+    flex: 1 1 0;
+    min-width: 20px;
+    height: 1px;
+    background: linear-gradient(90deg, transparent, rgba(255, 138, 31, .5) 20%, rgba(255, 210, 122, .85) 50%, rgba(255, 138, 31, .5) 80%, transparent);
+}
+.hud__rule::after {
+    content: "";
+    position: absolute;
+    left: 50%; top: 50%;
+    width: 5px; height: 5px;
+    transform: translate(-50%, -50%) rotate(45deg);
+    background: #ffd27a;
+    box-shadow: 0 0 6px rgba(255, 138, 31, .9);
+}
+
+/* status chip (also a button: clicking it gives the game keyboard focus) */
+.hud__chip {
+    pointer-events: auto;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    height: 20px;
+    padding: 0 11px 0 9px;
+    margin: 0;
+    border: 1px solid rgba(255, 138, 31, .4);
+    border-radius: 999px;
+    background: rgba(255, 138, 31, .08);
+    color: var(--chakra-gold);
+    font: inherit;
+    letter-spacing: inherit;
+    text-transform: inherit;
+    cursor: default;
+    outline: none;
+    transition: color .25s ease, border-color .25s ease, background-color .25s ease;
+}
+.hud__chip i {
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: var(--chakra-hot);
+    box-shadow: 0 0 8px var(--chakra);
+    animation: chip-pulse 2.2s ease-in-out infinite;
+    transition: background-color .25s ease, box-shadow .25s ease;
+}
+@keyframes chip-pulse { 0%, 100% { opacity: .45; } 50% { opacity: 1; } }
+.hud__chip[data-state="idle"] {
+    cursor: pointer;
+    color: var(--ink-dim);
+    border-color: rgba(255, 255, 255, .18);
+    background: rgba(255, 255, 255, .04);
+}
+.hud__chip[data-state="idle"] i { background: #7b82a3; box-shadow: none; animation: none; opacity: .8; }
+.hud__chip[data-state="idle"]:hover { color: var(--chakra-gold); border-color: rgba(255, 138, 31, .6); }
+.hud__chip:focus-visible { box-shadow: 0 0 0 2px var(--night), 0 0 0 4px var(--neon); }
+
+/* read-outs in the bottom plate */
+.hud__metric { display: inline-flex; align-items: baseline; gap: 8px; white-space: nowrap; }
+.hud__metric b { font-weight: 600; font-size: 9px; letter-spacing: .22em; color: #7b82a3; }
+.hud__metric span { color: var(--chakra-gold); font-variant-numeric: tabular-nums; letter-spacing: .1em; }
+.hud__sep { flex: none; width: 1px; height: 12px; background: linear-gradient(180deg, transparent, rgba(255, 138, 31, .5), transparent); }
+
+/* buttons in the plates */
+.hud__btn {
+    pointer-events: auto;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    height: 20px;
+    padding: 0 12px 0 9px;
+    margin: 0;
+    border: 1px solid rgba(255, 138, 31, .5);
+    border-radius: 4px;
+    background: linear-gradient(180deg, rgba(255, 179, 71, .16), rgba(232, 89, 12, .10));
+    color: var(--chakra-gold);
+    font: inherit;
+    letter-spacing: inherit;
+    text-transform: inherit;
+    cursor: pointer;
+    outline: none;
+    transition: background-color .2s ease, border-color .2s ease, box-shadow .2s ease, transform .15s ease, color .2s ease;
+}
+.hud__btn svg { width: 12px; height: 12px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.hud__btn:hover {
+    color: #fff0c2;
+    border-color: rgba(255, 210, 122, .9);
+    background: linear-gradient(180deg, rgba(255, 179, 71, .34), rgba(232, 89, 12, .22));
+    box-shadow: 0 0 14px rgba(255, 138, 31, .55);
+    transform: translateY(-1px);
+}
+.hud__btn:active { transform: translateY(0) scale(.97); }
+.hud__btn:focus-visible { box-shadow: 0 0 0 2px var(--night), 0 0 0 4px var(--neon); }
+.hud__btn[hidden] { display: none; }
+
+/* tall monitors: slightly roomier, larger plates */
+@media (min-height: 940px) and (min-width: 1500px) {
+    :root { --hud-h: 48px; --rod-w: 26px; }
+    #stage { --cut: 18px; }
+    .hud { font-size: 12px; gap: 16px; }
+    .hud__crest { font-size: 15px; }
+    .hud__metric b { font-size: 10px; }
+    .hud__chip, .hud__btn { height: 25px; }
+    .hud__btn svg { width: 14px; height: 14px; }
+}
+
+/* short windows (laptops): tighter plates so the picture keeps most of the height */
+@media (max-height: 760px) {
+    :root { --hud-h: 32px; }
+    .hud { font-size: 10px; gap: 10px; }
+    .hud__crest { font-size: 11px; }
+    .hud__chip, .hud__btn { height: 17px; }
+    .hud__metric b { font-size: 8px; }
+    #stage { --cut: 11px; }
+}
+
+/* phones / very small windows: no plates, no rods. The picture gets every pixel. */
+@media (max-width: 760px), (max-height: 560px) {
+    :root { --gutter: 6px; --hud-h: 0px; --rod-w: 0px; --gap: 2px; --ring: 1.5px; }
+    #stage { --radius: 4px; }
+    .hud, .rod, .clasp, .glint { display: none; }
+    .halo { animation: none; opacity: .7; }
 }
 
 /* =====================================================================
@@ -755,7 +1038,10 @@ body::-webkit-scrollbar { display: none; width: 0; height: 0; }
     .ambient__seal { transition-duration: .01ms !important; transition-delay: 0s !important; }
     .loader.is-indeterminate .loader__fill { animation: none; width: 100%; opacity: .5; }
     #splash { transition-duration: .01ms !important; transition-delay: 0s !important; }
-    .game-live #stage::after { animation: none; }
+    .halo, .glint i, .hud__chip i { animation: none !important; }
+    .halo { opacity: .8; }
+    .glint { display: none; }
+    .ambient__spot { transition-duration: .01ms !important; transition-delay: 0s !important; }
 }
 </style>
 
@@ -776,6 +1062,7 @@ body::-webkit-scrollbar { display: none; width: 0; height: 0; }
         <div class="ambient__bg"></div>
         <div class="ambient__lines"></div>
         <div class="ambient__seal"></div>
+        <div class="ambient__spot"></div>
         <div class="ambient__embers" id="embers"></div>
         <div class="ambient__vignette"></div>
     </div>
@@ -791,13 +1078,49 @@ body::-webkit-scrollbar { display: none; width: 0; height: 0; }
 
     <!-- the game: the canvas keeps id="canvas" (pygbag looks it up by that id) -->
     <div id="app">
-        <div id="stage">
+        <div id="stage" data-scale="crisp">
+            <!-- the canvas keeps id="canvas" (pygbag looks it up by that id) and is the ONLY thing that sizes the stage -->
             <canvas class="emscripten" id="canvas"
 width="1px"
 height="1px"
             oncontextmenu="event.preventDefault()" tabindex=1>
             </canvas>
+
+            <!-- decoration: everything below sits outside the canvas box and never intercepts the mouse -->
+            <div class="halo"  aria-hidden="true"></div>
             <div class="frame" aria-hidden="true"></div>
+            <div class="lip"   aria-hidden="true"></div>
+            <div class="glint glint--top"    aria-hidden="true"><i></i></div>
+            <div class="glint glint--bottom" aria-hidden="true"><i></i></div>
+            <div class="clasp clasp--tl" aria-hidden="true"></div>
+            <div class="clasp clasp--tr" aria-hidden="true"></div>
+            <div class="clasp clasp--bl" aria-hidden="true"></div>
+            <div class="clasp clasp--br" aria-hidden="true"></div>
+            <div class="rod rod--l" aria-hidden="true"><i></i><i></i></div>
+            <div class="rod rod--r" aria-hidden="true"><i></i><i></i></div>
+
+            <!-- HUD: top plate -->
+            <div class="hud hud--top" role="group" aria-label="Game status">
+                <div class="hud__crest"><span class="hud__gem"></span><span>Eternal Summoners</span></div>
+                <div class="hud__rule" aria-hidden="true"></div>
+                <button type="button" class="hud__chip" id="hud-link" data-state="live" title="Click to give the game keyboard focus">
+                    <i aria-hidden="true"></i><span id="hud-link-text">Link active</span>
+                </button>
+            </div>
+
+            <!-- HUD: bottom plate -->
+            <div class="hud hud--bottom" role="group" aria-label="Display options">
+                <div class="hud__metric"><b>Res</b><span>1100&times;700</span></div>
+                <span class="hud__sep" aria-hidden="true"></span>
+                <div class="hud__metric"><b>Zoom</b><span id="hud-zoom">1.00&times;</span></div>
+                <span class="hud__sep" aria-hidden="true"></span>
+                <div class="hud__metric"><b>Render</b><span id="hud-render">Pixel</span></div>
+                <div class="hud__rule" aria-hidden="true"></div>
+                <button type="button" class="hud__btn" id="hud-fs" aria-pressed="false" title="Toggle full screen">
+                    <svg viewBox="0 0 16 16" aria-hidden="true"><path id="hud-fs-icon" d="M2 6V2h4M10 2h4v4M14 10v4h-4M6 14H2v-4"/></svg>
+                    <span id="hud-fs-label">Full screen</span>
+                </button>
+            </div>
         </div>
     </div>
 
@@ -1213,12 +1536,15 @@ frameborder="1"
         if (!stage) { return; }
         var queued = false;
 
+        // layout width in CSS px (unlike getBoundingClientRect it ignores transforms and is not rounded)
+        function boxW() { return parseFloat(getComputedStyle(stage).width) || stage.offsetWidth; }
+
         function fit() {
             queued = false;
             var dpr = window.devicePixelRatio || 1;
 
             stage.style.removeProperty('--snap-w');                       // measure the natural (fill-the-window) size
-            var k = stage.getBoundingClientRect().width * dpr / NATIVE_W; // device pixels per game pixel
+            var k = boxW() * dpr / NATIVE_W;                              // device pixels per game pixel
             var n = Math.floor(k + 1e-6);
             var crisp;
 
@@ -1231,6 +1557,14 @@ frameborder="1"
 
             var mode = crisp ? 'crisp' : 'smooth';
             if (stage.getAttribute('data-scale') !== mode) { stage.setAttribute('data-scale', mode); }
+
+            // read-outs in the bottom HUD plate
+            var zoomEl = document.getElementById('hud-zoom'), renderEl = document.getElementById('hud-render');
+            if (zoomEl) {
+                var z = boxW() / NATIVE_W;
+                zoomEl.textContent = z.toFixed(2) + '\u00d7';
+            }
+            if (renderEl) { renderEl.textContent = crisp ? 'Pixel' : 'Smooth'; }
         }
 
         function queue() {
@@ -1244,6 +1578,88 @@ frameborder="1"
         document.addEventListener('fullscreenchange', queue);
         document.addEventListener('webkitfullscreenchange', queue);
         fit();
+    })();
+    </script>
+
+    <script type="application/javascript">
+    /* =====================================================================
+       HUD controller: the status chip and the full screen button.
+       Both keep the keyboard focus on the canvas, because pygbag listens for keys there.
+       ===================================================================== */
+    (function () {
+        'use strict';
+
+        var canvas = document.getElementById('canvas');
+        var chip = document.getElementById('hud-link'), chipText = document.getElementById('hud-link-text');
+        var fsBtn = document.getElementById('hud-fs'), fsLabel = document.getElementById('hud-fs-label');
+        var fsIcon = document.getElementById('hud-fs-icon');
+        if (!canvas) { return; }
+
+        var ICON_ENTER = 'M2 6V2h4M10 2h4v4M14 10v4h-4M6 14H2v-4';
+        var ICON_EXIT  = 'M6 2v4H2M14 6h-4V2M10 14v-4h4M2 10h4v4';
+
+        function focusGame() { try { canvas.focus({ preventScroll: true }); } catch (e) { /* ignore */ } }
+
+        /* ---------- status chip ---------- */
+        function paintLink() {
+            if (!chip) { return; }
+            var live = document.hasFocus() && document.activeElement === canvas;
+            var next = live ? 'live' : 'idle';
+            if (chip.getAttribute('data-state') !== next) {
+                chip.setAttribute('data-state', next);
+                chipText.textContent = live ? 'Link active' : 'Click to focus';
+            }
+        }
+        function paintLinkSoon() { setTimeout(paintLink, 0); }   // activeElement settles after the event
+
+        ['focusin', 'focusout', 'pointerdown', 'keydown'].forEach(function (n) { document.addEventListener(n, paintLinkSoon, true); });
+        window.addEventListener('focus', paintLinkSoon);
+        window.addEventListener('blur', paintLinkSoon);
+        document.addEventListener('visibilitychange', paintLinkSoon);
+        if (chip) {
+            chip.addEventListener('mousedown', function (e) { e.preventDefault(); });
+            chip.addEventListener('click', function () { focusGame(); paintLink(); });
+        }
+
+        /* ---------- full screen ---------- */
+        var root = document.documentElement;
+        var canFs = !!(document.fullscreenEnabled || document.webkitFullscreenEnabled);
+        function fsElement() { return document.fullscreenElement || document.webkitFullscreenElement || null; }
+
+        function paintFs() {
+            if (!fsBtn) { return; }
+            var on = !!fsElement();
+            fsBtn.setAttribute('aria-pressed', on ? 'true' : 'false');
+            fsLabel.textContent = on ? 'Exit full screen' : 'Full screen';
+            if (fsIcon) { fsIcon.setAttribute('d', on ? ICON_EXIT : ICON_ENTER); }
+        }
+
+        function toggleFs() {
+            try {
+                var p;
+                if (fsElement()) {
+                    p = (document.exitFullscreen || document.webkitExitFullscreen).call(document);
+                } else {
+                    p = (root.requestFullscreen || root.webkitRequestFullscreen).call(root);
+                }
+                if (p && p.catch) { p.catch(function () {}); }
+            } catch (e) { /* ignore */ }
+            focusGame();
+            paintLinkSoon();
+        }
+
+        if (fsBtn) {
+            if (!canFs) {
+                fsBtn.hidden = true;               // e.g. iPhone Safari has no fullscreen API for pages
+            } else {
+                fsBtn.addEventListener('mousedown', function (e) { e.preventDefault(); });   // keep focus on the canvas
+                fsBtn.addEventListener('click', toggleFs);
+                document.addEventListener('fullscreenchange', paintFs);
+                document.addEventListener('webkitfullscreenchange', paintFs);
+                paintFs();
+            }
+        }
+        paintLink();
     })();
     </script>
 

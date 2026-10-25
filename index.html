@@ -23,7 +23,7 @@ from pathlib import Path
 # do not rename
 async def custom_site():
     import embed
-    platform.document.body.style.background = "#7f7f7f"
+    platform.document.body.style.background = "#10121c"
 
     platform.window.transfer.hidden = true
     platform.window.canvas.style.visibility = "visible"
@@ -122,24 +122,9 @@ asyncio.run( custom_site() )
 #
 # do not alter that comment block it is separating python code from html code
 # =============================================================================
-# --></script><head><!--
-//=============================================================================
-//
-//
-//
-//
-//
-//
-//
-
-    {%- if cookiecutter.comment != "" -%}
-{{cookiecutter.comment}}
-    {% endif %}
-
---><script type="application/javascript">
+# --></script><head>
+<script type="application/javascript">
 // END BLOCK
-
-
 
 // this dict is available under PyConfig.config from __main__
 
@@ -178,51 +163,521 @@ function show_infobox() {
 
 </script>
 
-    <title>du_an_codegame</title>
+    <title>Eternal Summoners</title>
     <meta charset="UTF-8">
     <meta http-equiv="X-UA-Compatible" content="IE=edge">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta name="viewport" content="height=device-height, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <meta name="description" content="Eternal Summoners - a pixel-art gacha strategy RPG you can play in your browser.">
+    <meta name="theme-color" content="#10121c">
+    <meta name="color-scheme" content="dark">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes"/>
 
-
     <link rel="icon" type="image/png" href="favicon.png" sizes="16x16">
 
+    <!-- Optional web fonts for the splash screen only. If they fail to load, the fallback stacks below are used. -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700&family=Shippori+Mincho+B1:wght@800&display=swap">
+
 <style>
-    html, body {
-        width: 100%;
-        height: 100%;
-        margin: 0;
-        padding: 0;
-        background-color: #10121c;
-        overflow: hidden;
-        display: flex;
-        justify-content: center;
-        align-items: center;
-    }
+/* =====================================================================
+   Eternal Summoners - web shell
+   Page colour #10121c is BG = (16, 18, 28) from config.py.
+   ===================================================================== */
+:root {
+    --night: #10121c;
+    --night-2: #1a1e33;
+    --ink: #e9ecf6;
+    --ink-dim: #a3a9c4;
+    --chakra: #ff8a1f;
+    --chakra-hot: #ffb347;
+    --chakra-gold: #ffd27a;
+    --chakra-deep: #e8590c;
+    --neon: #35d0ff;
 
-    #canvas, canvas, .emscripten, canvas.emscripten {
-        width: 100vw !important;
-        height: calc(100vw * (700 / 1100)) !important;
-        max-height: 100vh !important;
-        max-width: calc(100vh * (1100 / 700)) !important;
-        object-fit: contain;
-    }
+    /* space kept free around the game frame (also leaves room for the corner brackets) */
+    --gutter: clamp(8px, 1.8vmin, 20px);
+    --pad-x: max(var(--gutter), env(safe-area-inset-left, 0px), env(safe-area-inset-right, 0px));
+    --pad-y: max(var(--gutter), env(safe-area-inset-top, 0px), env(safe-area-inset-bottom, 0px));
+    --vh: 100vh;
 
-    #status, #progress, #infobox {
-        display: none !important;
-    }
+    --font-title: "Shippori Mincho B1", "Yu Mincho", "Hiragino Mincho ProN", Georgia, "Times New Roman", serif;
+    --font-ui: "Chakra Petch", "Bahnschrift", "Segoe UI", system-ui, -apple-system, Roboto, sans-serif;
+}
+@supports (height: 100dvh) {
+    :root { --vh: 100dvh; }
+}
+
+/* ---------- page ---------- */
+html, body {
+    width: 100%;
+    height: 100%;
+    margin: 0;
+    padding: 0;
+    overflow: hidden !important;
+    overscroll-behavior: none;
+    /* !important so the inline "#7f7f7f" that pygbag's Python code sets can never win */
+    background: var(--night) !important;
+    color-scheme: dark;
+}
+
+/* pygbag's own loading widgets: still in the DOM (pygbag writes to them) but never shown;
+   the splash screen below replaces them */
+#transfer, #status, #progress, #infobox {
+    display: none !important;
+}
+
+/* ---------- game stage ---------- */
+#app {
+    position: fixed;
+    top: 0; right: 0; bottom: 0; left: 0;
+    z-index: 1;
+    display: grid;
+    place-items: center;
+    pointer-events: none;   /* only the stage itself takes input */
+}
+
+/* Largest 1100:700 box that fits the window. The canvas fills it, so it is never stretched. */
+#stage {
+    position: relative;
+    pointer-events: auto;
+    width: min(calc(100vw - 2 * var(--pad-x)), calc((var(--vh) - 2 * var(--pad-y)) * 1100 / 700));
+    aspect-ratio: 1100 / 700;
+    background: var(--night);
+    border-radius: 2px;
+    touch-action: none;
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-touch-callout: none;
+    -webkit-tap-highlight-color: transparent;
+    /* The frame is drawn with box-shadow rings and pseudo-elements, NOT with a border or padding:
+       pygbag/SDL needs the canvas box to be exact or mouse coordinates drift. */
+    box-shadow:
+        0 0 0 1px rgba(255, 255, 255, .06),
+        0 0 0 4px #0a0b12,
+        0 0 0 5px rgba(255, 138, 31, .38),
+        0 0 28px 2px rgba(255, 138, 31, .14),
+        0 0 90px 12px rgba(53, 208, 255, .06),
+        0 24px 80px rgba(0, 0, 0, .7);
+}
+
+/* The !important flags beat the inline width/height/margin that pygbag's window_resize() writes. */
+#stage > #canvas {
+    position: absolute !important;
+    top: 0 !important;
+    left: 0 !important;
+    width: 100% !important;
+    height: 100% !important;
+    min-width: 0 !important;
+    min-height: 0 !important;
+    max-width: none !important;
+    max-height: none !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    border: 0 !important;
+    transform: none !important;
+    display: block !important;
+    border-radius: inherit;
+    background: var(--night);
+    outline: none;
+    /* Crisp pixels when the browser scales the 1100x700 canvas.
+       Delete these three lines if you prefer smooth (bilinear) scaling. */
+    image-rendering: -moz-crisp-edges;
+    image-rendering: crisp-edges;
+    image-rendering: pixelated;
+}
+
+/* corner brackets */
+#stage::before {
+    content: "";
+    position: absolute;
+    z-index: 3;
+    pointer-events: none;
+    top: calc(var(--gutter) * -.62);
+    right: calc(var(--gutter) * -.62);
+    bottom: calc(var(--gutter) * -.62);
+    left: calc(var(--gutter) * -.62);
+    --l: clamp(14px, 3vmin, 30px);
+    --t: 2px;
+    --c: rgba(255, 138, 31, .95);
+    background:
+        linear-gradient(var(--c), var(--c)) 0 0 / var(--l) var(--t) no-repeat,
+        linear-gradient(var(--c), var(--c)) 0 0 / var(--t) var(--l) no-repeat,
+        linear-gradient(var(--c), var(--c)) 100% 0 / var(--l) var(--t) no-repeat,
+        linear-gradient(var(--c), var(--c)) 100% 0 / var(--t) var(--l) no-repeat,
+        linear-gradient(var(--c), var(--c)) 0 100% / var(--l) var(--t) no-repeat,
+        linear-gradient(var(--c), var(--c)) 0 100% / var(--t) var(--l) no-repeat,
+        linear-gradient(var(--c), var(--c)) 100% 100% / var(--l) var(--t) no-repeat,
+        linear-gradient(var(--c), var(--c)) 100% 100% / var(--t) var(--l) no-repeat;
+    filter: drop-shadow(0 0 4px rgba(255, 138, 31, .7));
+}
+
+/* one-off glow pulse on the frame when the splash hands over to the game */
+#stage::after {
+    content: "";
+    position: absolute;
+    top: 0; right: 0; bottom: 0; left: 0;
+    z-index: 2;
+    pointer-events: none;
+    border-radius: inherit;
+    opacity: 0;
+    box-shadow: 0 0 0 1px rgba(255, 170, 70, .9), 0 0 36px 6px rgba(255, 138, 31, .55);
+}
+.game-live #stage::after { animation: frame-flash 1.2s ease-out 1; }
+@keyframes frame-flash { from { opacity: 1; } to { opacity: 0; } }
+
+/* =====================================================================
+   Splash screen
+   ===================================================================== */
+#splash {
+    position: fixed;
+    top: 0; right: 0; bottom: 0; left: 0;
+    z-index: 1000;
+    display: grid;
+    place-items: center;
+    overflow: hidden;
+    background: var(--night);
+    color: var(--ink);
+    font-family: var(--font-ui);
+    -webkit-user-select: none;
+    user-select: none;
+    transition:
+        opacity .75s cubic-bezier(.4, 0, .2, 1),
+        transform .75s cubic-bezier(.4, 0, .2, 1),
+        visibility 0s linear .75s;
+}
+#splash.is-leaving {
+    opacity: 0;
+    transform: scale(1.035);
+    visibility: hidden;
+    pointer-events: none;
+}
+
+.splash__bg,
+.splash__lines {
+    position: absolute;
+    top: 0; right: 0; bottom: 0; left: 0;
+    pointer-events: none;
+}
+.splash__bg {
+    background:
+        radial-gradient(70vmax 46vmax at 12% 108%, rgba(255, 110, 20, .26), transparent 62%),
+        radial-gradient(60vmax 42vmax at 96% -8%, rgba(53, 208, 255, .15), transparent 62%),
+        radial-gradient(90vmax 70vmax at 50% 46%, var(--night-2) 0%, var(--night) 68%);
+}
+.splash__lines {
+    background: repeating-linear-gradient(112deg, rgba(255, 255, 255, .028) 0 1px, transparent 1px 22px);
+    -webkit-mask: radial-gradient(ellipse at 50% 50%, #000 0, transparent 72%);
+            mask: radial-gradient(ellipse at 50% 50%, #000 0, transparent 72%);
+}
+
+/* big slowly turning seal ring behind the title */
+.splash__seal {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: min(132vmin, 1280px);
+    aspect-ratio: 1;
+    border-radius: 50%;
+    pointer-events: none;
+    opacity: .55;
+    background: repeating-conic-gradient(from 0deg, rgba(255, 138, 31, .34) 0 .5deg, transparent .5deg 5deg);
+    -webkit-mask: radial-gradient(closest-side, transparent 90%, #000 90.6%, #000 100%);
+            mask: radial-gradient(closest-side, transparent 90%, #000 90.6%, #000 100%);
+    transform: translate(-50%, -50%) rotate(0deg);
+    animation: seal-turn 160s linear infinite;
+    will-change: transform;
+}
+@keyframes seal-turn { to { transform: translate(-50%, -50%) rotate(360deg); } }
+
+/* rising chakra sparks (generated by the script below) */
+.splash__embers {
+    position: absolute;
+    top: 0; right: 0; bottom: 0; left: 0;
+    pointer-events: none;
+    overflow: hidden;
+}
+.splash__embers i {
+    position: absolute;
+    bottom: -14px;
+    left: var(--x);
+    width: var(--s);
+    height: var(--s);
+    border-radius: 50%;
+    background: var(--c);
+    box-shadow: 0 0 calc(var(--s) * 3) var(--c);
+    opacity: 0;
+    animation: ember-rise var(--d) linear var(--delay) infinite;
+    will-change: transform, opacity;
+}
+@keyframes ember-rise {
+    0%   { transform: translate3d(0, 0, 0) scale(1);                  opacity: 0; }
+    10%  { opacity: .9; }
+    80%  { opacity: .55; }
+    100% { transform: translate3d(var(--drift), -110vh, 0) scale(.3); opacity: 0; }
+}
+
+.splash__card {
+    position: relative;
+    z-index: 3;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    width: min(860px, 94vw);
+    box-sizing: border-box;
+    padding: clamp(16px, 4vmin, 40px);
+    text-align: center;
+}
+
+.splash__title {
+    margin: 0;
+    font-family: var(--font-title);
+    font-weight: 800;
+    font-size: clamp(40px, min(11vmin, 12.5vw), 104px);
+    line-height: .98;
+    letter-spacing: .07em;
+    text-transform: uppercase;
+    background: linear-gradient(180deg, #fff0c2 0%, #ffc15a 34%, #ff8a1f 68%, #e8590c 100%);
+    -webkit-background-clip: text;
+            background-clip: text;
+    -webkit-text-fill-color: transparent;
+    color: transparent;
+    filter: drop-shadow(0 0 22px rgba(255, 138, 31, .38)) drop-shadow(0 3px 0 rgba(90, 25, 0, .55));
+}
+.splash__title span { display: block; }
+
+.splash__tagline {
+    margin: clamp(12px, 2.4vmin, 22px) 0 0;
+    max-width: 34ch;
+    font-size: clamp(14px, 2.3vmin, 18px);
+    line-height: 1.45;
+    letter-spacing: .02em;
+    color: var(--ink-dim);
+}
+
+/* loading bar */
+.loader {
+    position: relative;
+    width: min(440px, 78vw);
+    height: 5px;
+    margin-top: clamp(26px, 6vmin, 56px);
+    border-radius: 3px;
+    overflow: hidden;
+    background: rgba(255, 255, 255, .08);
+    transition: opacity .5s ease .2s;
+}
+.loader__fill {
+    position: absolute;
+    top: 0; left: 0;
+    width: 100%;
+    height: 100%;
+    transform-origin: 0 50%;
+    transform: scaleX(0);
+    background: linear-gradient(90deg, var(--chakra-deep), var(--chakra), var(--chakra-gold));
+    box-shadow: 0 0 12px rgba(255, 138, 31, .8);
+    transition: transform .35s ease;
+}
+/* when real progress is unknown: a segment sweeps across (transform only, so it keeps moving
+   even while Python blocks the main thread during start-up) */
+.loader.is-indeterminate .loader__fill {
+    width: 38%;
+    transform: none;
+    transition: none;
+    animation: loader-sweep 1.5s cubic-bezier(.45, 0, .25, 1) infinite;
+}
+@keyframes loader-sweep {
+    from { transform: translateX(-110%); }
+    to   { transform: translateX(280%); }
+}
+#splash[data-state="ready"] .loader,
+#splash[data-state="launching"] .loader { opacity: 0; }
+
+.status {
+    margin: 14px 0 0;
+    min-height: 1.4em;
+    font-size: clamp(13px, 2vmin, 15px);
+    letter-spacing: .03em;
+    color: var(--ink-dim);
+    font-variant-numeric: tabular-nums;
+}
+
+.start {
+    margin-top: clamp(16px, 3.6vmin, 30px);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 18px;
+}
+
+/* ---- start button ----
+   clip-path cuts the angled ends, and it would also cut off a glow, so the glow lives on the wrapper */
+.btn-wrap {
+    display: inline-block;
+    filter: drop-shadow(0 0 8px rgba(255, 138, 31, .45));
+    transition: filter .3s ease, transform .18s ease;
+}
+.btn {
+    --cut: 16px;
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    min-width: min(300px, 78vw);
+    height: clamp(50px, 8vmin, 60px);
+    padding: 0 38px;
+    margin: 0;
+    border: 0;
+    overflow: hidden;
+    cursor: pointer;
+    font: 700 clamp(16px, 2.6vmin, 20px) / 1 var(--font-ui);
+    letter-spacing: .05em;
+    color: #2a1100;
+    background: linear-gradient(180deg, #ffd98a 0%, #ffa534 46%, #ee6a10 100%);
+    clip-path: polygon(var(--cut) 0, 100% 0, calc(100% - var(--cut)) 100%, 0 100%);
+    box-shadow: inset 0 2px 0 rgba(255, 255, 255, .55), inset 0 -5px 10px rgba(130, 40, 0, .35);
+    -webkit-tap-highlight-color: transparent;
+    outline: none;
+}
+.btn::after {              /* light sweep */
+    content: "";
+    position: absolute;
+    top: 0; bottom: 0; left: 0;
+    width: 60%;
+    pointer-events: none;
+    background: linear-gradient(105deg, transparent 0, rgba(255, 255, 255, .65) 50%, transparent 100%);
+    transform: translateX(-130%) skewX(-12deg);
+    transition: transform .7s ease;
+}
+.btn:not(:disabled):hover::after,
+.btn:focus-visible::after { transform: translateX(230%) skewX(-12deg); }
+
+.btn:focus-visible {
+    box-shadow: inset 0 0 0 3px #fff, inset 0 0 0 5px var(--neon);
+}
+.btn__spin {
+    display: none;
+    width: 15px;
+    height: 15px;
+    box-sizing: border-box;
+    border-radius: 50%;
+    border: 2px solid currentColor;
+    border-right-color: transparent;
+    animation: spin .8s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+#splash[data-state="loading"] .btn__spin,
+#splash[data-state="launching"] .btn__spin { display: inline-block; }
+
+/* loading: dim and inert */
+.btn:disabled {
+    cursor: progress;
+    color: #9399b6;
+    background: linear-gradient(180deg, #343a56, #232840);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, .12);
+}
+#splash[data-state="loading"] .btn-wrap { filter: none; }
+
+/* ready: ignites, then breathes until clicked */
+#splash[data-state="ready"] .btn { animation: ignite .9s ease-out 1; }
+#splash[data-state="ready"] .btn-wrap { animation: breathe 2.6s ease-in-out infinite; }
+@keyframes ignite {
+    0%   { filter: brightness(1); }
+    35%  { filter: brightness(1.7); }
+    100% { filter: brightness(1); }
+}
+@keyframes breathe {
+    0%, 100% { filter: drop-shadow(0 0 8px rgba(255, 138, 31, .45)); }
+    50%      { filter: drop-shadow(0 0 20px rgba(255, 138, 31, .85)); }
+}
+/* hover / keyboard focus: hot orange glow with a neon-blue rim */
+#splash[data-state="ready"] .btn-wrap:hover {
+    animation: none;
+    filter: drop-shadow(0 0 14px rgba(255, 138, 31, .95)) drop-shadow(0 0 36px rgba(53, 208, 255, .45));
+    transform: translateY(-2px);
+}
+/* same look for keyboard focus (kept as its own rule: browsers without :has() skip it cleanly) */
+#splash[data-state="ready"] .btn-wrap:has(.btn:focus-visible) {
+    animation: none;
+    filter: drop-shadow(0 0 14px rgba(255, 138, 31, .95)) drop-shadow(0 0 36px rgba(53, 208, 255, .45));
+}
+#splash[data-state="ready"] .btn-wrap:active { transform: translateY(1px) scale(.985); }
+
+/* launching: already pressed */
+#splash[data-state="launching"] .btn { cursor: progress; pointer-events: none; }
+#splash[data-state="launching"] .btn-wrap { animation: none; filter: drop-shadow(0 0 16px rgba(255, 138, 31, .8)); }
+
+/* ---- full screen option ---- */
+.fs {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: clamp(13px, 2vmin, 15px);
+    color: var(--ink-dim);
+    cursor: pointer;
+    transition: color .2s;
+}
+.fs[hidden] { display: none; }
+.fs:hover { color: var(--ink); }
+.fs input {
+    position: absolute;
+    opacity: 0;
+    width: 1px;
+    height: 1px;
+}
+.fs__box {
+    width: 18px;
+    height: 18px;
+    box-sizing: border-box;
+    display: grid;
+    place-items: center;
+    border: 1.5px solid rgba(255, 255, 255, .35);
+    border-radius: 3px;
+    transition: border-color .2s;
+}
+.fs__box::after {
+    content: "";
+    width: 9px;
+    height: 9px;
+    border-radius: 1px;
+    background: var(--chakra);
+    transform: scale(0);
+    transition: transform .15s ease;
+}
+.fs input:checked + .fs__box { border-color: var(--chakra); }
+.fs input:checked + .fs__box::after { transform: scale(1); }
+.fs input:focus-visible + .fs__box { outline: 2px solid var(--neon); outline-offset: 3px; }
+
+.rotate-hint {
+    display: none;
+    margin: 18px 0 0;
+    font-size: 13px;
+    color: var(--chakra-hot);
+}
+@media (orientation: portrait) and (max-width: 720px) {
+    .rotate-hint { display: block; }
+}
+
+/* short landscape screens (phones): put the title on one line */
+@media (max-height: 460px) {
+    .splash__title { font-size: clamp(30px, min(8vmin, 6vw), 60px); }
+    .splash__title span { display: inline; }
+    .splash__tagline { display: none; }
+    .loader { margin-top: 18px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .splash__seal,
+    .btn-wrap,
+    .btn { animation: none !important; }
+    .splash__embers { display: none; }
+    .loader.is-indeterminate .loader__fill { animation: none; width: 100%; opacity: .5; }
+    #splash { transition-duration: .01ms !important; transition-delay: 0s !important; }
+    .game-live #stage::after { animation: none; }
+}
 </style>
-
-    <script>
-/*
-        if (navigator.serviceWorker)
-            navigator.serviceWorker.register("https://pygame-web.github.io/cdn/0.9.3/pygbag0.9.3.js")
-        else
-            console.warn("Service workers not supported")
-*/
-    </script>
 
     <script src="https://pygame-web.github.io/cdn/0.9.3//browserfs.min.js"></script>
 
@@ -230,6 +685,13 @@ function show_infobox() {
 
 <body>
 
+    <noscript>
+        <p style="position:fixed;top:40%;left:0;right:0;z-index:2000;margin:0;text-align:center;font:16px system-ui,sans-serif;color:#e9ecf6">
+            Eternal Summoners needs JavaScript. Please enable it and reload the page.
+        </p>
+    </noscript>
+
+    <!-- pygbag progress widgets: kept because pygbag writes to them, hidden by CSS -->
     <div id="transfer" align=center>
 <!--        <div class="spinner" id='spinner'></div> -->
         <div class="emscripten" id="status">Downloading...</div>
@@ -238,13 +700,16 @@ function show_infobox() {
         </div>
     </div>
 
-
-
-    <canvas class="emscripten" id="canvas"
+    <!-- the game: the canvas keeps id="canvas" (pygbag looks it up by that id) -->
+    <div id="app">
+        <div id="stage">
+            <canvas class="emscripten" id="canvas"
 width="1px"
 height="1px"
-    oncontextmenu="event.preventDefault()" tabindex=1>
-    </canvas>
+            oncontextmenu="event.preventDefault()" tabindex=1>
+            </canvas>
+        </div>
+    </div>
 
     <canvas class="emscripten" id="canvas3d"
 width="1280px"
@@ -252,6 +717,7 @@ height="720px"
     oncontextmenu="event.preventDefault()" tabindex=1 hidden>
     </canvas>
 
+    <!-- pygbag writes its status messages here ("Ready to start ! ..."); the splash script reads them -->
     <div id="infobox">Loading, please wait ...</div>
 
     <div id=html></div>
@@ -309,6 +775,41 @@ frameborder="1"
 
     <div id="pyconsole">
         <div id="terminal" tabIndex=1 align="left"></div>
+    </div>
+
+    <!-- ================= splash / start screen ================= -->
+    <div id="splash" role="dialog" aria-modal="true" aria-labelledby="splash-title" data-state="loading">
+        <div class="splash__bg" aria-hidden="true"></div>
+        <div class="splash__lines" aria-hidden="true"></div>
+        <div class="splash__seal" aria-hidden="true"></div>
+        <div class="splash__embers" id="embers" aria-hidden="true"></div>
+
+        <main class="splash__card">
+            <h1 class="splash__title" id="splash-title"><span>Eternal</span> <span>Summoners</span></h1>
+            <p class="splash__tagline">Summon fighters, build your squad and take down the bosses.</p>
+
+            <div class="loader is-indeterminate" id="splash-meter" role="progressbar"
+                 aria-label="Loading game files" aria-valuemin="0" aria-valuemax="100">
+                <div class="loader__fill" id="splash-fill"></div>
+            </div>
+            <p class="status" role="status"><span id="status-text">Loading game files&hellip;</span> <span id="status-pct" aria-hidden="true"></span></p>
+
+            <div class="start">
+                <span class="btn-wrap">
+                    <button type="button" class="btn" id="start-btn" disabled>
+                        <i class="btn__spin" aria-hidden="true"></i>
+                        <span id="start-label">Loading&hellip;</span>
+                    </button>
+                </span>
+                <label class="fs" id="fs-row">
+                    <input type="checkbox" id="fs-opt">
+                    <span class="fs__box" aria-hidden="true"></span>
+                    <span>Start in full screen</span>
+                </label>
+            </div>
+
+            <p class="rotate-hint">Tip: rotate your phone to landscape for a bigger view.</p>
+        </main>
     </div>
 
     <script type="application/javascript">
@@ -372,6 +873,237 @@ frameborder="1"
         window.frames["iframe"].location = url;
     }
 
+    </script>
+
+    <script type="application/javascript">
+    /* =====================================================================
+       Splash controller
+       loading   -> pygbag is still downloading / unpacking (button disabled)
+       ready     -> pygbag printed "Ready to start" and is waiting for a click
+       launching -> the click happened, Python is starting the game
+       done      -> first frame is on the canvas, splash fades out and is removed
+
+       The click is NOT stopped or cancelled: pygbag listens for that same click
+       to unlock browser audio ("media user engagement") and then starts main.py.
+       ===================================================================== */
+    (function () {
+        'use strict';
+
+        // Visible text. Edit here to re-word or translate.
+        var TEXT = {
+            loading:      'Loading game files\u2026',
+            downloading:  'Downloading game files',
+            slowLoad:     'Still loading \u2013 a slow connection can take a minute\u2026',
+            ready:        'Ready.',
+            launching:    'Starting the game\u2026',
+            slowLaunch:   'Almost there \u2013 unpacking assets\u2026',
+            btnLoading:   'Loading\u2026',
+            btnReady:     'Start game',
+            btnLaunching: 'Starting\u2026'
+        };
+        var SLOW_LOAD_MS = 45000, SLOW_LAUNCH_MS = 10000, GIVE_UP_MS = 60000, POLL_MS = 150;
+        var FS_KEY = 'eternal-summoners:fullscreen';
+
+        var $ = function (id) { return document.getElementById(id); };
+        var splash = $('splash');
+        if (!splash) { return; }
+
+        var btn = $('start-btn'), btnLabel = $('start-label');
+        var meter = $('splash-meter'), fill = $('splash-fill');
+        var statusText = $('status-text'), statusPct = $('status-pct');
+        var fsRow = $('fs-row'), fsOpt = $('fs-opt');
+        var canvas = $('canvas'), infobox = $('infobox'), prog = $('progress'), embers = $('embers');
+
+        var state = 'loading', finished = false;
+        var t0 = Date.now(), tLaunch = 0, pyDoneAt = 0;
+        var timer = 0, mo = null;
+
+        /* ---------- small helpers ---------- */
+        function setStatus(text, pct) {
+            if (statusText.textContent !== text) { statusText.textContent = text; }
+            pct = pct || '';
+            if (statusPct.textContent !== pct) { statusPct.textContent = pct; }
+        }
+
+        function setProgress(f) {                    // f: 0..1, or null = unknown
+            if (f === null) {
+                meter.classList.add('is-indeterminate');
+                meter.removeAttribute('aria-valuenow');
+                return;
+            }
+            f = Math.max(0, Math.min(1, f));
+            meter.classList.remove('is-indeterminate');
+            fill.style.transform = 'scaleX(' + f + ')';
+            meter.setAttribute('aria-valuenow', String(Math.round(f * 100)));
+        }
+
+        function readProgress() {                    // pygbag's hidden <progress>, when it reports real numbers
+            if (!prog) { return null; }
+            var max = +prog.max, val = +prog.value;
+            if (!(max > 0) || !(val > 0) || val >= max) { return null; }
+            return val / max;
+        }
+
+        function engaged() {                         // pygbag's "media user engagement" flag
+            try { return !!(window.MM && window.MM.UME); } catch (e) { return false; }
+        }
+
+        function gameLive() {                        // pygame.display.set_mode() has resized the 1x1 placeholder canvas
+            return !!canvas && canvas.width > 1 && canvas.height > 1;
+        }
+
+        function spawnEmbers(n) {
+            if (!embers || (window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches)) { return; }
+            var colors = ['#ff8a1f', '#ffb347', '#ffd27a', '#ff6a1a'], frag = document.createDocumentFragment();
+            for (var i = 0; i < n; i++) {
+                var el = document.createElement('i'), st = el.style;
+                st.setProperty('--x', (Math.random() * 100).toFixed(1) + '%');
+                st.setProperty('--s', (1.5 + Math.random() * 3.5).toFixed(1) + 'px');
+                st.setProperty('--d', (9 + Math.random() * 12).toFixed(1) + 's');
+                st.setProperty('--delay', (-Math.random() * 20).toFixed(1) + 's');
+                st.setProperty('--drift', Math.round((Math.random() - 0.5) * 180) + 'px');
+                st.setProperty('--c', i % 7 === 0 ? '#35d0ff' : colors[Math.floor(Math.random() * colors.length)]);
+                frag.appendChild(el);
+            }
+            embers.appendChild(frag);
+        }
+
+        function goFullscreen() {                    // must run inside the click handler (needs a user gesture)
+            var el = document.documentElement;
+            var req = el.requestFullscreen || el.webkitRequestFullscreen || el.msRequestFullscreen;
+            if (!req) { return; }
+            try {
+                var p = req.call(el);
+                if (p && p.catch) { p.catch(function () {}); }
+            } catch (e) { /* ignore */ }
+        }
+
+        /* ---------- state machine ---------- */
+        function setState(next) {
+            if (state === next) { return; }
+            state = next;
+            splash.setAttribute('data-state', next);
+
+            if (next === 'ready') {
+                btn.disabled = false;
+                btnLabel.textContent = TEXT.btnReady;
+                setProgress(1);
+                setStatus(TEXT.ready);
+                try { btn.focus({ preventScroll: true }); } catch (e) { /* ignore */ }
+            } else if (next === 'launching') {
+                tLaunch = Date.now();
+                btn.setAttribute('aria-busy', 'true');
+                btnLabel.textContent = TEXT.btnLaunching;
+                setStatus(TEXT.launching);
+            }
+        }
+
+        function checkReady() {
+            if (state !== 'loading' || !infobox) { return; }
+            if (/ready to start|click\/touch/i.test(infobox.textContent || '')) { setState('ready'); }
+        }
+
+        function start() {
+            if (state !== 'ready') { return; }
+            try { localStorage.setItem(FS_KEY, fsOpt && fsOpt.checked ? '1' : '0'); } catch (e) { /* ignore */ }
+            if (fsOpt && fsOpt.checked && !fsRow.hidden) { goFullscreen(); }
+            setState('launching');
+        }
+
+        function finish() {
+            if (finished) { return; }
+            finished = true;
+            clearInterval(timer);
+            if (mo) { mo.disconnect(); }
+
+            splash.setAttribute('data-state', 'done');
+            splash.classList.add('is-leaving');
+            document.documentElement.classList.add('game-live');
+            try { canvas.focus({ preventScroll: true }); } catch (e) { /* ignore */ }
+
+            var removed = false;
+            function cleanup() {
+                if (removed) { return; }
+                removed = true;
+                if (splash.parentNode) { splash.parentNode.removeChild(splash); }   // stops the ember/seal animations for good
+            }
+            splash.addEventListener('transitionend', function (e) {
+                if (e.target === splash && e.propertyName === 'opacity') { cleanup(); }
+            });
+            setTimeout(cleanup, 1500);
+        }
+
+        function tick() {
+            if (finished) { return; }
+            var now = Date.now();
+            checkReady();
+
+            if (state === 'loading') {
+                var f = readProgress();
+                if (f !== null) {
+                    setProgress(f);
+                    setStatus(TEXT.downloading, Math.round(f * 100) + '%');
+                } else {
+                    setProgress(null);
+                    setStatus(now - t0 > SLOW_LOAD_MS ? TEXT.slowLoad : TEXT.loading);
+                }
+            } else if (state === 'launching' && now - tLaunch > SLOW_LAUNCH_MS) {
+                setStatus(TEXT.slowLaunch);
+            }
+
+            // Python only gets as far as set_mode() after the engagement click, and it runs the first
+            // frame before it yields to the browser, so this poll first sees a sized canvas only once
+            // a frame has been drawn.
+            var live = engaged() && gameLive();
+            var pythonReturned = pyDoneAt && now - pyDoneAt > 800;
+            var gaveUp = state === 'launching' && now - tLaunch > GIVE_UP_MS;
+            if (live || pythonReturned || gaveUp) { finish(); }
+        }
+
+        /* ---------- wire up ---------- */
+        function init() {
+            spawnEmbers(14);
+            setProgress(null);
+
+            if (fsOpt) {
+                var fsOk = document.fullscreenEnabled || document.webkitFullscreenEnabled;
+                if (!fsOk) {
+                    fsRow.hidden = true;                // e.g. iPhone Safari has no fullscreen API for pages
+                } else {
+                    try { fsOpt.checked = localStorage.getItem(FS_KEY) === '1'; } catch (e) { /* ignore */ }
+                }
+            }
+
+            // Any click on the splash starts the game (like pygbag's own "click/touch page"),
+            // except clicks on the full screen option. Enter/Space on the focused button also lands here.
+            splash.addEventListener('click', function (e) {
+                if (e.target && e.target.closest && e.target.closest('#fs-row')) { return; }
+                start();
+            });
+
+            if (infobox && 'MutationObserver' in window) {
+                mo = new MutationObserver(function () {
+                    checkReady();
+                    if (state === 'launching' && !pyDoneAt && infobox.style.display === 'none') { pyDoneAt = Date.now(); }
+                });
+                mo.observe(infobox, {
+                    childList: true, characterData: true, subtree: true,
+                    attributes: true, attributeFilter: ['style']
+                });
+            }
+
+            checkReady();
+            timer = setInterval(tick, POLL_MS);
+        }
+
+        try {
+            init();
+        } catch (err) {
+            // never leave the player stuck behind the splash because of a script problem
+            if (window.console) { console.error('splash failed, hiding it', err); }
+            splash.style.display = 'none';
+        }
+    })();
     </script>
 
 </body>
